@@ -19,7 +19,7 @@ Ensure you have the following installed:
 ```bash
 # Clone the repo
 git clone <your-repo-url>
-cd tiktok-scapper-api
+cd scapper-api
 
 # Install dependencies
 npm install
