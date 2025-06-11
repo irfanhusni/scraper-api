@@ -41,7 +41,7 @@ Scrape products by category ID.
 
 **Example:**
 ```bash
-curl 'http://localhost:3000/tiktok/search-by-category?categoryid=123456'
+curl 'http://localhost:3000/tiktok/search-by-category?categoryid=842888'
 ```
 
 ### GET `/tiktok/search-by-shop`
@@ -53,7 +53,8 @@ Scrape products by seller name or ID (matches sellerId or shopName).
 
 **Example:**
 ```bash
-curl 'http://localhost:3000/tiktok/search-by-shop?seller=myshop'
+curl 'http://localhost:3000/tiktok/search-by-shop?seller=7494922665450703600'
+curl 'http://localhost:3000/tiktok/search-by-shop?seller='1000 BUKU''
 ```
 
 
@@ -66,7 +67,7 @@ Fetch product detail by product ID.
 
 **Example:**
 ```bash
-curl 'http://localhost:3000/tiktok/product-detail?productId=987654'
+curl 'http://localhost:3000/tiktok/product-detail?productId=1729715253716093680'
 ```
 
 ---
