@@ -6,6 +6,10 @@ import fs from 'fs';
 const dataDir = path.join(__dirname, '..', 'data');
 const databasePath = path.join(dataDir, 'products.db');
 
+if (!fs.existsSync(dataDir)) {
+  fs.mkdirSync(dataDir, { recursive: true });
+}
+
 const insertedProductIds = new Set<string>();
 const insertedCategoryIds = new Set<string>();
 
