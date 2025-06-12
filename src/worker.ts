@@ -6,6 +6,11 @@ console.log('⏳ TiktokShop scraper worker started...');
 // ✅ Run immediately once at startup for testing
 (async () => {
   console.log('🧪 Running test scrape now...');
+  const start = Date.now();
+
   const links = await scrapeCategoryLinks();
-  console.log('🧪 Test run completed and saved to NDJSON');
+
+  const end = Date.now();
+  const durationInSec = ((end - start) / 1000).toFixed(2);
+  console.log(`🧪 Test run completed and saved to Database in ${durationInSec} seconds`);
 })();
