@@ -1,33 +1,57 @@
-import { chromium, Page } from 'playwright';
+import { chromium } from 'playwright';
 import * as path from 'path';
 import sqlite3 from 'sqlite3';
 import { open, Database } from 'sqlite';
+import axios from 'axios';
 import {
   insertProductIntoDb,
   insertCategoryIntoDb,
   initDatabase
 } from './db-util';
+import { getRandomUserAgent } from './random-ua-util';
 
 const dataDir = path.join(__dirname, '..', 'data');
 const databasePath = path.join(dataDir, 'products.db');
 
+// API response interface
+interface TikTokProduct {
+  product_id: string;
+  seller_info?: {
+    seller_id: string;
+    shop_name: string;
+  };
+}
+
+interface TikTokProductListResponse {
+  code: number;
+  message: string;
+  data: {
+    productList: TikTokProduct[];
+    hasMore: boolean;
+  };
+}
+
 export async function scrapeCategoryLinks(): Promise<void> {
   let browser;
-  let page: Page | undefined;
   let db: Database | undefined;
 
   try {
     db = await open({ filename: databasePath, driver: sqlite3.Database });
     await initDatabase(db);
-    console.log('📊 SQLite initialized at:', databasePath);
+    console.log('SQLite initialized at:', databasePath);
 
     browser = await chromium.launch({ headless: true });
-    page = await browser.newPage();
-    const baseURL = 'https://shop-id.tokopedia.com/c';
+    const context = await browser.newContext({
+      userAgent: getRandomUserAgent(),
+      viewport: { width: 390, height: 844 },
+      isMobile: true,
+      locale: 'id-ID'
+    });
+    const page = await context.newPage();
 
-    console.log('🌐 Navigating to', baseURL);
+    const baseURL = 'https://shop-id.tokopedia.com/c';
     await page.goto(baseURL, { waitUntil: 'networkidle', timeout: 60000 });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
     await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
     await page.waitForTimeout(3000);
 
@@ -47,68 +71,61 @@ export async function scrapeCategoryLinks(): Promise<void> {
       })
     );
 
-    console.log(`🔍 Found ${topCategories.length} top-level categories`);
+    console.log(`Found ${topCategories.length} top-level categories`);
 
     for (const cat of topCategories) {
       await insertCategoryIntoDb(db, { categoryId: cat.categoryid, link: cat.link });
-      console.log(`📥 Inserted category: ${cat.link}`);
+      console.log(`Inserted category: ${cat.link}`);
 
-      try {
-        await page.goto(cat.link, { waitUntil: 'networkidle', timeout: 60000 });
-        await page.waitForTimeout(2000);
+      const headers = {
+        'user-agent': getRandomUserAgent(),
+        'content-type': 'application/json',
+        'origin': 'https://shop-id.tokopedia.com',
+        'referer': cat.link,
+        'accept': 'application/json,*/*;q=0.8'
+      };
 
-        const scripts = await page.$$('script[data-fn-args]');
-        if (scripts.length >= 2) {
-          const content = await scripts[1].getAttribute('data-fn-args');
-          if (content) {
-            try {
-              const parsed = JSON.parse(content);
-              const productList = Array.isArray(parsed) && parsed[2]?.currentProductsInfo?.productList;
-              if (Array.isArray(productList)) {
-                for (const p of productList) {
-                  const productId = p.product_id;
-                  const sellerId = p.seller_info?.seller_id;
-                  const shopName = p.seller_info?.shop_name;
-                  if (productId && sellerId && shopName) {
-                    await insertProductIntoDb(db, { productId, sellerId, shopName });
-                  }
-                }
-                console.log(`✅ Inserted ${productList.length} products for ${cat.link}`);
-              }
-            } catch (err) {
-              console.warn(`⚠️ Failed to parse data-fn-args for ${cat.link}:`, err);
-            }
-          }
-        }
+      const excludeIds: string[] = [];
+      let hasMore = true;
+      let pageCount = 0;
 
-        const subSelector = 'a.category-item-Y9CQFP[href^="https://shop-id.tokopedia.com/c/"]';
-        const subExists = await page.$(subSelector);
+      while (hasMore) {
+        const payload = {
+          category_id: parseInt(cat.categoryid),
+          exclude_product_ids: excludeIds
+        };
 
-        if (subExists) {
-          const subCategories = await page.$$eval(subSelector, (anchors) =>
-            Array.from(new Set(
-              anchors
-                .filter(a => a instanceof HTMLAnchorElement)
-                .map(a => (a as HTMLAnchorElement).href)
-                .filter(href => href.includes('/c/') && /\d+$/.test(href))
-            )).map(link => {
-              const match = link.match(/\/(\d+)$/);
-              const categoryid = match ? match[1] : '';
-              return { categoryid, link };
-            })
+        try {
+          const res = await axios.post<TikTokProductListResponse>(
+            'https://shop-id.tokopedia.com/api/shop/id/home/product_list',
+            payload,
+            { headers }
           );
 
-          for (const sub of subCategories) {
-            await insertCategoryIntoDb(db, { categoryId: sub.categoryid, link: sub.link });
-            console.log(`   ↳ Subcategory inserted: ${sub.link}`);
+          const productList = res.data?.data?.productList ?? [];
+          hasMore = res.data?.data?.hasMore ?? false;
+
+          for (const p of productList) {
+            const productId = p.product_id;
+            const sellerId = p.seller_info?.seller_id;
+            const shopName = p.seller_info?.shop_name;
+            if (productId && sellerId && shopName) {
+              await insertProductIntoDb(db, { productId, sellerId, shopName });
+              excludeIds.push(productId);
+            }
           }
+
+          console.log(`🛒 Page ${++pageCount}: Inserted ${productList.length} products`);
+          await new Promise(res => setTimeout(res, 1000)); // polite delay
+
+        } catch (err) {
+          console.warn(`⚠️ API request failed for category ${cat.categoryid}:`, err);
+          break;
         }
-      } catch (err) {
-        console.warn(`⚠️ Failed to process ${cat.link}:`, err);
       }
     }
 
-    console.log(`🎉 Scraping finished. Data saved to ${databasePath}`);
+    console.log(`Scraping finished. Data saved to ${databasePath}`);
   } catch (error) {
     console.error('❌ Error during scraping:', error);
   } finally {
